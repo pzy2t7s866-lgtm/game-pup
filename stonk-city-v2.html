@@ -21,6 +21,58 @@
 <div id="bossbar"><div id="bossfill"></div><span>NAKED SHORT BOSS</span></div>
 <div id="controls"><div class="group"><button class="control" data-key="left">◀</button><button class="control" data-key="right">▶</button></div><div class="group"><button class="control special" data-key="special">STONK<br>BLAST</button><button class="control drop" data-key="drop">PEPE<br>DROP</button><button class="control jump" data-key="jump">JUMP</button><button class="control attack" data-key="attack">SMASH</button></div></div>
 <div id="screen"><div class="card" id="card"></div></div><div id="captureBar"><button id="captureToggle" type="button">● RECORD</button><span id="captureStatus">Game video + music + effects</span></div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(() => {
+  'use strict';
+  const API='https://game-pup.onrender.com/api/stonk-city';
+  const KEY='stonk-city-best-v1';
+  let generation=0;
+  function readBest(mode) {try{return Number(JSON.parse(localStorage.getItem(KEY)||'{}')[mode])||0;}catch{return 0;}}
+  function saveBest(mode,score) {const best=Math.max(readBest(mode),score);try{const data=JSON.parse(localStorage.getItem(KEY)||'{}');data[mode]=best;localStorage.setItem(KEY,JSON.stringify(data));}catch{}return best;}
+  async function request(path,options={}) {
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+    try {
+      const response=await fetch(API+path,{...options,signal:controller.signal});
+      const type=response.headers.get('content-type')||'';
+      if(!type.includes('application/json')) throw Error('The score server needs its code update.');
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Score server unavailable');
+      return data;
+    } catch(error) {if(error.name==='AbortError')throw Error('Score server is waking up. Tap Retry.');throw error;}
+    finally {clearTimeout(timer);}
+  }
+  function element(tag,text){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;return el;}
+  window.StonkScores={
+    show(mode,score) {
+      const card=document.getElementById('card');if(!card)return;
+      const run=++generation,section=element('section');section.style.cssText='margin-top:18px;padding:14px;border:1px solid #78f5ba;border-radius:12px';
+      section.append(element('h2','HIGH SCORES'));
+      const selector=element('select');selector.setAttribute('aria-label','Leaderboard mode');selector.style.cssText='font:inherit;padding:8px;border-radius:8px';
+      for(const [value,label]of [['city','City leaderboard'],['space','WIZ space leaderboard']]){const option=element('option',label);option.value=value;selector.append(option);}selector.value=mode;
+      section.append(selector);
+      const personal=element('p'),status=element('p'),list=element('ol'),retry=element('button','RETRY');retry.className='big';retry.type='button';section.append(personal,status,list,retry);card.append(section);
+      let view=0,submitted=score===undefined;
+      function current(){return run===generation&&section.isConnected;}
+      async function load(){const id=++view;list.replaceChildren();personal.textContent='Best on this device: '+readBest(selector.value).toLocaleString();status.textContent='Loading shared leaderboard…';try{const data=await request('/leaderboard?mode='+selector.value);if(!current()||id!==view)return;for(const entry of data.scores||[]){list.append(element('li',entry.display_name+' — '+Number(entry.best_score).toLocaleString()));}status.textContent=list.children.length?'Shared Telegram leaderboard':'No scores yet. Be the first!';}catch(error){if(current()&&id===view)status.textContent=error.message;}}
+      const saving=element('p');section.insertBefore(saving,selector);
+      async function submit(){
+        if(score===undefined||submitted)return;
+        const initData=window.Telegram?.WebApp?.initData||'';
+        if(!initData){saving.textContent='Saved on this device. Open using the Mini App button in @GAMEPUPbot to save to the shared leaderboard.';return;}
+        saving.textContent='Saving Telegram high score…';
+        try{const data=await request('/score',{method:'POST',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:JSON.stringify({mode,score})});submitted=true;if(current()){saving.textContent='Telegram best: '+Number(data.best_score).toLocaleString()+' ✓ Saved';await load();}}
+        catch(error){if(current())saving.textContent='Score could not be saved: '+error.message;}
+      }
+      selector.onchange=load;retry.onclick=async()=>{retry.disabled=true;try{await submit();await load();}finally{retry.disabled=false;}};
+      if(score!==undefined)saveBest(mode,score);
+      load();submit();
+    }
+  };
+  try{window.Telegram?.WebApp?.ready();}catch{}
+})();
+
+</script>
 <script>
 (()=>{'use strict';
 const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d'),screen=document.querySelector('#screen'),card=document.querySelector('#card'),hud=document.querySelector('#hud'),controls=document.querySelector('#controls'),health=document.querySelector('#health'),scoreEl=document.querySelector('#score'),bossbar=document.querySelector('#bossbar'),bossfill=document.querySelector('#bossfill'),specialBtn=document.querySelector('.special');
@@ -34,7 +86,7 @@ let W,H,state='menu',selected=0,player,enemies=[],shots=[],heroShots=[],coins=[]
 function resize(){const s=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=Math.round(W*s);canvas.height=Math.round(H*s);ctx.setTransform(s,0,0,s,0,0)}addEventListener('resize',resize);resize();
 const floor=()=>H-Math.max(100,Math.min(155,H*.24)),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));function box(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(x,y,w,h)}function circle(x,y,r,c){ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill()}function menu(html){document.querySelector('#captureBar').style.display='none';screen.style.display='grid';hud.style.display='none';controls.style.display='none';bossbar.style.display='none';card.innerHTML=html}
 function faceSVG(i){if(i===3)return `<img class="portrait fullbody-portrait" src="${pointfarmData}" alt="pointfarm Stonk Don full body">`;if(i<2)return `<img class="portrait fullbody-portrait" src="${cityBodyData[i]}" alt="${heroes[i].name} full body">`;if(i===0)return `<svg class="portrait" viewBox="0 0 80 80"><circle cx="40" cy="40" r="39" fill="#1a2440"/><path d="M20 37q2-22 20-22t20 22" fill="#5d3a27"/><circle cx="40" cy="42" r="23" fill="#efbd9e"/><path d="M14 27h52v10H14z" fill="#d9374e"/><path d="M58 33l15 13-18-4z" fill="#d9374e"/><rect x="22" y="37" width="15" height="10" rx="3" fill="#171927"/><rect x="43" y="37" width="15" height="10" rx="3" fill="#171927"/><path d="M37 41h6M31 57q9 7 18 0" stroke="#653b2d" stroke-width="3" fill="none"/><path d="M27 52q13 14 26 0" stroke="#704735" stroke-width="4" fill="none"/></svg>`;if(i===1)return `<svg class="portrait" viewBox="0 0 80 80"><circle cx="40" cy="40" r="39" fill="#1a2440"/><circle cx="40" cy="43" r="24" fill="#efbd9e"/><path d="M17 38q0-27 23-27 25 2 24 29-8-16-14-17-17 12-33 15" fill="#242128"/><path d="M25 41q6-4 11 0M45 41q6-4 11 0" stroke="#30241f" stroke-width="3"/><circle cx="31" cy="44" r="2"/><circle cx="51" cy="44" r="2"/><path d="M32 58q9 6 18-1" stroke="#6f3f31" stroke-width="3" fill="none"/><path d="M23 34q7-6 14-2M44 32q8-3 14 3" stroke="#30241f" stroke-width="3" fill="none"/></svg>`;return `<img class="portrait" src="${portraitData[i]||tyleeData}" alt="${heroes[i].name}">`}
-function intro(){state='menu';menu(`<small>GAME PUP PRESENTS</small><img class="poster" src="${posterData}" alt="Stonk City game artwork"><p>Five heroes. Two adventures. Fight through four city levels with a bank district finale, or fly with WIZ to Tylee and Roaring Kitty.</p><button id="watch" class="big">CHOOSE YOUR HERO ▶</button>`);document.querySelector('#watch').onclick=select;}
+function intro(){state='menu';menu(`<small>GAME PUP PRESENTS</small><img class="poster" src="${posterData}" alt="Stonk City game artwork"><p>Five heroes. Two adventures. Fight through four city levels with a bank district finale, or fly with WIZ to Tylee and Roaring Kitty.</p><button id="watch" class="big">CHOOSE YOUR HERO ▶</button>`);document.querySelector('#watch').onclick=select;window.StonkScores?.show('city');}
 function watch(){state='video';menu(`<h2>THE CITY NEEDS A HERO</h2><video id="movie" src="telegram_video.mp4" controls autoplay playsinline></video><p>Your opening video plays here.</p><button id="continue" class="big">CONTINUE →</button>`);const m=document.querySelector('#movie');m.onended=select;m.play().catch(()=>{});document.querySelector('#continue').onclick=select}
 function select(){state='select';startMusic();menu(`<small>CHOOSE YOUR FIGHTER</small><img class="poster" src="${posterData}" alt="Stonk City with Keith, Tylee and Ryan"><button id="music-toggle" class="music-toggle" type="button">♫ MUSIC ON</button><div>${heroes.map((h,i)=>`<button class="hero ${selected===i?'selected':''}" data-hero="${i}">${faceSVG(i)}${h.name}<small>${h.note}</small></button>`).join('')}</div><p>Choose WIZ for a separate space adventure: put on a helmet, blast meteors, visit three planets, feed Tylee, meet STONK DON, and high five Roaring Kitty. Other heroes battle through four Stonk City levels, with the whole crew joining the bank district finale.</p><button id="start" class="big">PLAY SELECTED HERO →</button>`);document.querySelectorAll('[data-hero]').forEach(b=>b.onclick=()=>{selected=+b.dataset.hero;select()});document.querySelector('#start').onclick=start;document.querySelector('#music-toggle').onclick=()=>{musicEnabled=!musicEnabled;if(musicEnabled)startMusic();else Object.values(soundtrack).forEach(track=>track.pause());document.querySelector('#music-toggle').textContent=musicEnabled?'♫ MUSIC ON':'♫ MUSIC OFF'}}
 function makeEnemy(x,type=cityLevel===4?(Math.random()<.5?'BANK BOT':'HALT GUARD'):(Math.random()<.48?'JEET':'SHORT')){return{x,y:floor(),hp:type==='BOSS'?18+(cityLevel-1)*9:2+(wave>1)+(cityLevel-1)*2,max:type==='BOSS'?18+(cityLevel-1)*9:2+(wave>1)+(cityLevel-1)*2,speed:type==='BOSS'?1.05+(cityLevel-1)*.23:.75+Math.random()*.7+wave*.12+(cityLevel-1)*.28,kind:type,stun:0,dead:false,throw:type==='BOSS'?105:80+Math.random()*100,w:type==='BOSS'?(cityLevel===2?160:76):38,h:type==='BOSS'?(cityLevel===2?72:103):58,level:type==='BOSS'?cityLevel:0,windup:0,dash:0,dir:-1,shield:false}}
@@ -46,7 +98,7 @@ function hit(e,damage){if(e.dead)return;if(e.kind==='BOSS'&&e.shield){damage=Mat
 function damageCar(car,amount){if(car.dead)return;car.hp-=amount;car.flash=12;burst(car.x,car.y-28,'#ffcf69',9);if(car.hp<=0){car.dead=true;points+=250;label(car.x,car.y-105,'LAMBO LIQUIDATED!','#ffec7b',80);burst(car.x,car.y-22,'#ff8d64',22)}}
 function damagePlayer(text='OUCH!'){if(player.inv>0)return;player.hp--;player.inv=70;player.vy=-5;burst(player.x,player.y-35,'#ff5c87',14);label(player.x,player.y-90,text,'#ff688e',38);if(player.hp<=0){if(player.diamonds>=5){player.diamonds-=5;player.hp=Math.max(3,Math.ceil(player.max/2));player.inv=150;player.vy=0;player.y=floor();player.standing=null;shots=[];coins=[];label(player.x,player.y-145,'DIAMOND HANDS! CONTINUE!','#9defff',110);tone(784,.45,'triangle',.065)}else end(false)}}
 function blast(){if(player.charge<5)return;if(cityLevel===4&&haltTimer){haltTimer=0;label(player.x,player.y-165,'TRADING RESUMED!','#8cffe1',95)}player.charge=0;player.cool=38;label(player.x,player.y-130,'STONK BLAST!','#86ffcf',80);burst(player.x,player.y-45,'#86ffcf',45);for(const e of enemies)if(Math.abs(e.x-player.x)<300)hit(e,e.kind==='BOSS'?4:9);shots=[];for(const car of cars)if(Math.abs(car.x-player.x)<340)damageCar(car,9);updateSpecial()}
-function end(won){const wasSpace=state==='space';state='end';menu(`<h1>${won?(wasSpace?'GALAXY STONKED!':'FOUR LEVELS STONKED!'):'TRY AGAIN!'}</h1><p>${heroes[selected].name} scored <strong>${points}</strong> points with ${wasSpace?'a galactic rescue':kos+' knockouts'}.</p><button id="again" class="big">PLAY AGAIN</button><button id="change" class="big">CHANGE FIGHTER</button>`);document.querySelector('#again').onclick=start;document.querySelector('#change').onclick=select}
+function end(won){const wasSpace=state==='space';state='end';menu(`<h1>${won?(wasSpace?'GALAXY STONKED!':'FOUR LEVELS STONKED!'):'TRY AGAIN!'}</h1><p>${heroes[selected].name} scored <strong>${points}</strong> points with ${wasSpace?'a galactic rescue':kos+' knockouts'}.</p><button id="again" class="big">PLAY AGAIN</button><button id="change" class="big">CHANGE FIGHTER</button>`);document.querySelector('#again').onclick=start;document.querySelector('#change').onclick=select;window.StonkScores?.show(wasSpace?'space':'city',points)}
 function collectCity(p){p.taken=true;if(p.kind==='diamond'){player.diamonds++;points+=50;label(p.x,floor()-135,player.diamonds>=5?'CHECKPOINT READY!':'DIAMOND '+player.diamonds+'/5','#a8ecff',90)}else{player.hp++;player.max=Math.max(player.max,player.hp);label(p.x,floor()-135,p.kind==='heart'?'+1 LIFE!':'+1 LIFE! TENDIES!','#ffb9cb',80)}tone(p.kind==='diamond'?880:659,.21,'triangle',.055);burst(p.x,floor()-85,p.kind==='diamond'?'#92e7ff':'#ff9ac4',12)}
 function updateBoss(e,dt,g){if(e.level===4){const dist=Math.abs(e.x-player.x);e.shield=haltTimer>0;if(!e.stun&&dist<510&&dist>115)e.x+=Math.sign(player.x-e.x)*e.speed*.7*dt;if(e.throw<=0&&dist<620){e.throw=95;for(const dy of [-1,0,1])shots.push({x:e.x,y:g-70,vx:Math.sign(player.x-e.x)*5.5,vy:dy*2,dead:false,boss:true});label(e.x,g-142,'HALT WAVE!','#ff849f',45)}if(dist<70&&player.y>g-92)damagePlayer('BANK BOSS!');return}const dist=Math.abs(e.x-player.x);if(e.level===1){if(!e.stun){if(dist<520)e.x+=Math.sign(player.x-e.x)*e.speed*dt;if(e.throw<=0){e.throw=70;for(const vy of [-5,-2,1])shots.push({x:e.x,y:g-55,vx:Math.sign(player.x-e.x)*5,vy,dead:false,boss:true})}}if(dist<58&&player.y>g-64)damagePlayer('CRUSHED!');return}
 if(e.level===2){if(e.windup>0){e.windup-=dt;if(e.windup<=0){e.dash=36;e.dir=Math.sign(player.x-e.x)||-1;label(e.x,g-135,'WEN LAMBO!','#ffe682',55);speak('Wen Lambo!',1.1)}}else if(e.dash>0){e.dash-=dt;e.x+=e.dir*8.8*dt;burst(e.x-e.dir*50,g-15,'#ffb65e',1)}else{if(!e.stun&&dist>175&&dist<520)e.x+=Math.sign(player.x-e.x)*e.speed*dt;if(e.throw<=0&&dist<600){e.throw=145;e.windup=37;label(e.x,g-125,'RAM INCOMING!','#ffdc71',70)}}if(Math.abs(e.x-player.x)<90&&player.y>g-75)damagePlayer(e.dash>0?'BOSS RAM!':'LAMBO HIT!');return}
