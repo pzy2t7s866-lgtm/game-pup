@@ -16,3 +16,9 @@ mountStonkScores(app, express, new pg.Pool({connectionString:process.env.DATABAS
 }
 fs.copyFileSync(path.join(__dirname,'stonk-scores.mjs'),path.join(__dirname,'app','stonk-scores.mjs'));
 console.log('Stonk City score routes installed alongside Game Pup.');
+
+if (!server.includes("from './racing-scores.mjs'")) {
+  server = "import mountRacingScores from './racing-scores.mjs';\n" + server.replace('const app = express();', 'const app = express();\nmountRacingScores(app, express, new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,connectionTimeoutMillis:10000}));');
+  fs.writeFileSync(target,server);
+}
+fs.copyFileSync(path.join(__dirname,'racing-scores.mjs'),path.join(__dirname,'app','racing-scores.mjs'));
